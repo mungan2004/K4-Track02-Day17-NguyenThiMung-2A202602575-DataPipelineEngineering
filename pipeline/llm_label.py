@@ -80,14 +80,59 @@ def live_tickets(con: duckdb.DuckDBPyConnection) -> list[tuple[str, str]]:
     """).fetchall()
 
 
+from .embed import text_hash
+
 def label_tickets(con: duckdb.DuckDBPyConnection, llm: FakeLLM) -> dict:
-    """NAIVE version (shipped): one LLM call per ticket per run, no validation."""
-    rows = []
-    for ticket_id, text in live_tickets(con):
-        raw = llm.complete(PROMPT_TEMPLATE.format(text=text))
-        rows.append((ticket_id, raw, MODEL, PROMPT_VERSION))
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS llm_label_cache (
+            text_hash VARCHAR, model VARCHAR, prompt_version VARCHAR, raw_response VARCHAR
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS llm_label_quarantine (
+            ticket_id VARCHAR, raw_response VARCHAR, model VARCHAR, prompt_version VARCHAR
+        )
+    """)
+    
+    tickets = live_tickets(con)
+    rows_to_insert = []
+    
+    for ticket_id, text in tickets:
+        thash = text_hash(text)
+        cached = con.execute(
+            "SELECT raw_response FROM llm_label_cache WHERE text_hash = ? AND model = ? AND prompt_version = ?",
+            [thash, MODEL, PROMPT_VERSION]
+        ).fetchone()
+        
+        if cached:
+            raw = cached[0]
+        else:
+            raw = llm.complete(PROMPT_TEMPLATE.format(text=text))
+            con.execute(
+                "INSERT INTO llm_label_cache VALUES (?, ?, ?, ?)",
+                [thash, MODEL, PROMPT_VERSION, raw]
+            )
+            
+        rows_to_insert.append((ticket_id, raw, MODEL, PROMPT_VERSION))
+        
     con.execute("""CREATE OR REPLACE TABLE gold_ticket_labels (
         ticket_id VARCHAR, label VARCHAR, model VARCHAR, prompt_version VARCHAR)""")
-    if rows:
-        con.executemany("INSERT INTO gold_ticket_labels VALUES (?, ?, ?, ?)", rows)
-    return {"labeled": len(rows), "calls": llm.calls}
+    con.execute("DELETE FROM llm_label_quarantine")
+    
+    gold_rows = []
+    quarantine_rows = []
+    
+    for ticket_id, raw, model, prompt_version in rows_to_insert:
+        label = parse_label(raw)
+        if label:
+            gold_rows.append((ticket_id, label, model, prompt_version))
+        else:
+            quarantine_rows.append((ticket_id, raw, model, prompt_version))
+            
+    if gold_rows:
+        con.executemany("INSERT INTO gold_ticket_labels VALUES (?, ?, ?, ?)", gold_rows)
+        
+    if quarantine_rows:
+        con.executemany("INSERT INTO llm_label_quarantine VALUES (?, ?, ?, ?)", quarantine_rows)
+
+    return {"labeled": len(gold_rows), "calls": llm.calls}
