@@ -5,7 +5,7 @@ Phần phân tích tối đa một trang, không tính output ở phần 5.
 
 **Họ tên / MSSV:** Nguyễn Thị Mừng/ 2A202602575
 **Repo:**  https://github.com/mungan2004/K4-Track02-Day17-NguyenThiMung-2A202602575-DataPipelineEngineering.git
-**Commit bài nộp:**  
+**Commit bài nộp:** a68bce349619b66195c8d7b085d069fa20d89d3d
 **AI đã dùng và phạm vi hỗ trợ (hoặc không dùng):** Antigravity IDE (Gemini) hỗ trợ phát hiện và sửa 3 lỗi
 **Nguồn tham khảo khác (nếu có):** 
 
